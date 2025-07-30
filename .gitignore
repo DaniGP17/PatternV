@@ -16,6 +16,7 @@
 
 # Debugger Files
 *.pdb
+x64/
 
 # Compiled Dynamic libraries
 *.so
@@ -39,3 +40,5 @@
 
 # debug information files
 *.dwo
+/.idea
+/.vs
