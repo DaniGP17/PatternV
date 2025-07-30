@@ -1,5 +1,6 @@
 # PatternV
 A tool to search pattern in all the GTA game builds, also can be used for other games.
+Also thanks so much to [Gogsi](https://github.com/Gogsi) for providing dumped build files.
 
 ## Usage
 1. Place all the game dumps in the `Builds` directory.
