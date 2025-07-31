@@ -3,6 +3,7 @@
 #include <string>
 #include <fstream>
 #include <regex>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -93,6 +94,9 @@ std::optional<std::string> extractBuildNumber(const std::string& filename) {
 }
 
 void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<uint8_t>>& pattern) {
+    using namespace std::chrono;
+    const auto start = high_resolution_clock::now();
+    
     for (const auto& entry : fs::directory_iterator(folderPath)) {
         if (!entry.is_regular_file() || entry.path().extension() != TARGET_EXTENSION)
             continue;
@@ -118,6 +122,10 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
             std::cout << "[-] Pattern not found in v" << build << '\n';
         }
     }
+
+    const auto end = high_resolution_clock::now();
+    const auto duration = duration_cast<milliseconds>(end - start).count();
+    std::cout << "\n[~] Scan completed in " << duration << " ms\n";
 }
 
 int main(int argc, char* argv[])
