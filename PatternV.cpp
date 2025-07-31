@@ -131,10 +131,29 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
 int main(int argc, char* argv[])
 {
     fs::path folderPath = "Builds/";
+    std::string argPattern;
 
     if(argc > 1)
     {
         folderPath = argv[1];
+        if (argc > 2)
+        {
+            argPattern = argv[2];
+        }
+    }
+
+    if (!argPattern.empty())
+    {
+        auto pattern = parseBytePattern(argPattern);
+
+        if (pattern.empty())
+        {
+            std::cerr << "Invalid pattern provided as argument.\n";
+            return 1;
+        }
+
+        scanDirectory(folderPath, pattern);
+        return 0;
     }
 
     if (!fs::exists(folderPath) || !fs::is_directory(folderPath)) {
