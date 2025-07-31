@@ -19,6 +19,16 @@ namespace fs = std::filesystem;
 
 constexpr auto TARGET_EXTENSION = ".exe";
 
+struct ResultLine {
+    int build;
+    std::string line;
+};
+
+struct SectionInfo {
+    size_t rawOffset;
+    size_t rawSize;
+};
+
 std::counting_semaphore<> sem(std::thread::hardware_concurrency());
 
 std::vector<std::optional<uint8_t>> parseBytePattern(const std::string& input)
@@ -120,11 +130,6 @@ std::optional<std::string> extractBuildNumber(const std::string& filename) {
     return std::nullopt;
 }
 
-struct SectionInfo {
-    size_t rawOffset;
-    size_t rawSize;
-};
-
 std::optional<SectionInfo> getTextSection(const std::vector<uint8_t>& buffer) {
     if (buffer.size() < 0x1000) return std::nullopt;
 
@@ -159,7 +164,7 @@ std::optional<SectionInfo> getTextSection(const std::vector<uint8_t>& buffer) {
     return std::nullopt;
 }
 
-void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<std::string>& outputBuffer)
+void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<ResultLine>& outputBuffer)
 {
     const auto filename = filePath.filename().string();
     const auto buffer = readFile(filePath);
@@ -193,11 +198,12 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
 
     {
         std::lock_guard lock(outputMutex);
-        outputBuffer.push_back(oss.str());
+        int buildNum = std::stoi(build);
+        outputBuffer.push_back({ buildNum, oss.str() });
     }
 }
 
-void scanFileLimited(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<std::string>& outputBuffer)
+void scanFileLimited(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<ResultLine>& outputBuffer)
 {
     sem.acquire();
     scanFile(filePath, pattern, outputMutex, outputBuffer);
@@ -208,7 +214,7 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
     using namespace std::chrono;
     const auto start = high_resolution_clock::now();
 
-    std::vector<std::string> outputBuffer;
+    std::vector<ResultLine> outputBuffer;
     std::mutex outputMutex;
     std::vector<std::future<void>> futures;
     
@@ -229,8 +235,13 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
     
     {
         std::lock_guard lock(outputMutex);
-        for (const auto& line : outputBuffer) {
-            std::cout << line << '\n';
+
+        std::sort(outputBuffer.begin(), outputBuffer.end(), [](const ResultLine& a, const ResultLine& b) {
+            return a.build < b.build;
+        });
+
+        for (const auto& result : outputBuffer) {
+            std::cout << result.line << '\n';
         }
     }
     
