@@ -93,6 +93,45 @@ std::optional<std::string> extractBuildNumber(const std::string& filename) {
     return std::nullopt;
 }
 
+struct SectionInfo {
+    size_t rawOffset;
+    size_t rawSize;
+};
+
+std::optional<SectionInfo> getTextSection(const std::vector<uint8_t>& buffer) {
+    if (buffer.size() < 0x1000) return std::nullopt;
+
+    const uint32_t dosSignature = *reinterpret_cast<const uint16_t*>(&buffer[0x00]);
+    if (dosSignature != 0x5A4D) return std::nullopt; // MZ
+
+    const uint32_t peOffset = *reinterpret_cast<const uint32_t*>(&buffer[0x3C]);
+    if (peOffset + 0x18 >= buffer.size()) return std::nullopt;
+
+    const uint32_t peSignature = *reinterpret_cast<const uint32_t*>(&buffer[peOffset]);
+    if (peSignature != 0x00004550) return std::nullopt; // PE\0\0
+
+    const uint16_t numberOfSections = *reinterpret_cast<const uint16_t*>(&buffer[peOffset + 6]);
+    const uint16_t sizeOfOptionalHeader = *reinterpret_cast<const uint16_t*>(&buffer[peOffset + 20]);
+
+    size_t sectionTableOffset = peOffset + 24 + sizeOfOptionalHeader;
+    for (int i = 0; i < numberOfSections; ++i) {
+        if (sectionTableOffset + 40 > buffer.size()) break;
+
+        const char* name = reinterpret_cast<const char*>(&buffer[sectionTableOffset]);
+        if (std::strncmp(name, ".text", 5) == 0) {
+            const uint32_t rawDataPtr = *reinterpret_cast<const uint32_t*>(&buffer[sectionTableOffset + 20]);
+            const uint32_t rawSize = *reinterpret_cast<const uint32_t*>(&buffer[sectionTableOffset + 16]);
+            if (rawDataPtr + rawSize <= buffer.size()) {
+                return SectionInfo{ rawDataPtr, rawSize };
+            }
+        }
+
+        sectionTableOffset += 40;
+    }
+
+    return std::nullopt;
+}
+
 void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<uint8_t>>& pattern) {
     using namespace std::chrono;
     const auto start = high_resolution_clock::now();
@@ -107,8 +146,17 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
         const auto buffer = readFile(filePath);
         if (buffer.empty()) continue;
 
+        auto textSection = getTextSection(buffer);
+        if (!textSection.has_value()) {
+            std::cerr << "[-] .text section not found in: " << filename << '\n';
+            continue;
+        }
+
+        std::vector<uint8_t> textSegment(buffer.begin() + textSection->rawOffset,
+                                         buffer.begin() + textSection->rawOffset + textSection->rawSize);
+
         const auto build = extractBuildNumber(filename).value_or(filename);
-        const auto matches = searchAllPatternOffsets(buffer, pattern);
+        const auto matches = searchAllPatternOffsets(textSegment, pattern);
 
         if (!matches.empty()) {
             std::cout << "[+] Pattern found in v" << build << " (" << matches.size() << " matches): ";
