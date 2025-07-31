@@ -42,3 +42,5 @@ x64/
 *.dwo
 /.idea
 /.vs
+/build
+.DS_Store
