@@ -65,10 +65,19 @@ std::vector<size_t> searchAllPatternOffsets(const uint8_t* data, size_t size, co
 
 std::vector<uint8_t> readFile(const fs::path& filepath) {
     FILE* file = nullptr;
+
+#ifdef _WIN32
     if (fopen_s(&file, filepath.string().c_str(), "rb") != 0 || !file) {
         std::cerr << "Failed to open: " << filepath << '\n';
         return {};
     }
+#else
+    file = fopen(filepath.string().c_str(), "rb");
+    if (!file) {
+        std::cerr << "Failed to open: " << filepath << '\n';
+        return {};
+    }
+#endif
 
     if (std::fseek(file, 0, SEEK_END) != 0) {
         fclose(file);
