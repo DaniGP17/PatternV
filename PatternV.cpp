@@ -4,10 +4,17 @@
 #include <fstream>
 #include <regex>
 #include <chrono>
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <future>
+#include <semaphore>
 
 namespace fs = std::filesystem;
 
 constexpr auto TARGET_EXTENSION = ".exe";
+
+std::counting_semaphore<> sem(std::thread::hardware_concurrency());
 
 std::vector<std::optional<uint8_t>> parseBytePattern(const std::string& input)
 {
@@ -38,47 +45,53 @@ std::vector<std::optional<uint8_t>> parseBytePattern(const std::string& input)
     return pattern;
 }
 
-bool matchesAt(const std::vector<uint8_t>& buffer, size_t pos, const std::vector<std::optional<uint8_t>>& pattern) {
-    if (pos + pattern.size() > buffer.size()) return false;
-
-    for (size_t i = 0; i < pattern.size(); ++i) {
-        if (pattern[i].has_value() && buffer[pos + i] != pattern[i].value()) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-std::vector<size_t> searchAllPatternOffsets(const std::vector<uint8_t>& buffer, const std::vector<std::optional<uint8_t>>& pattern) {
+std::vector<size_t> searchAllPatternOffsets(const uint8_t* data, size_t size, const std::vector<std::optional<uint8_t>>& pattern) {
     std::vector<size_t> matches;
-    if (buffer.size() < pattern.size()) return matches;
+    if (size < pattern.size()) return matches;
 
-    for (size_t i = 0; i <= buffer.size() - pattern.size(); ++i) {
-        if (matchesAt(buffer, i, pattern)) {
-            matches.push_back(i);
+    for (size_t i = 0; i <= size - pattern.size(); ++i) {
+        bool matched = true;
+        for (size_t j = 0; j < pattern.size(); ++j) {
+            if (pattern[j].has_value() && data[i + j] != pattern[j].value()) {
+                matched = false;
+                break;
+            }
         }
+        if (matched) matches.push_back(i);
     }
 
     return matches;
 }
 
 std::vector<uint8_t> readFile(const fs::path& filepath) {
-    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-    if (!file) {
+    FILE* file = nullptr;
+    if (fopen_s(&file, filepath.string().c_str(), "rb") != 0 || !file) {
         std::cerr << "Failed to open: " << filepath << '\n';
         return {};
     }
 
-    std::streamsize size = file.tellg();
-    file.seekg(0);
+    if (std::fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        std::cerr << "fseek() failed on: " << filepath << '\n';
+        return {};
+    }
+    
+    long size = std::ftell(file);
+    if (size <= 0) {
+        fclose(file);
+        std::cerr << "Empty or invalid file: " << filepath << '\n';
+        return {};
+    }
+    rewind(file);
 
     std::vector<uint8_t> buffer(size);
-    if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
+    if (std::fread(buffer.data(), 1, size, file) != static_cast<size_t>(size)) {
+        fclose(file);
         std::cerr << "Failed to read: " << filepath << '\n';
         return {};
     }
 
+    fclose(file);
     return buffer;
 }
 
@@ -132,45 +145,82 @@ std::optional<SectionInfo> getTextSection(const std::vector<uint8_t>& buffer) {
     return std::nullopt;
 }
 
+void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<std::string>& outputBuffer)
+{
+    const auto filename = filePath.filename().string();
+    const auto buffer = readFile(filePath);
+    if (buffer.empty()) return;
+
+    auto textSection = getTextSection(buffer);
+    if (!textSection.has_value()) {
+        std::lock_guard lock(outputMutex);
+        std::cerr << "[-] .text section not found in: " << filename << '\n';
+        return;
+    }
+
+    const uint8_t* textSegment = buffer.data() + textSection->rawOffset;
+    size_t textSize = textSection->rawSize;
+
+    const auto build = extractBuildNumber(filename).value_or(filename);
+    const auto matches = searchAllPatternOffsets(textSegment, textSize, pattern);
+
+    //std::lock_guard lock(outputMutex);
+    std::ostringstream oss;
+    if (!matches.empty()) {
+        oss << "[+] Pattern found in v" << build << " (" << matches.size() << " matches): ";
+        for (size_t i = 0; i < matches.size(); ++i) {
+            oss << "0x" << std::hex << std::uppercase << matches[i];
+            if (i != matches.size() - 1)
+                oss << ", ";
+        }
+        oss << std::dec;
+    } else {
+        oss << "[-] Pattern not found in v" << build;
+    }
+
+    {
+        std::lock_guard lock(outputMutex);
+        outputBuffer.push_back(oss.str());
+    }
+}
+
+void scanFileLimited(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<std::string>& outputBuffer)
+{
+    sem.acquire();
+    scanFile(filePath, pattern, outputMutex, outputBuffer);
+    sem.release();
+}
+
 void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<uint8_t>>& pattern) {
     using namespace std::chrono;
     const auto start = high_resolution_clock::now();
+
+    std::vector<std::string> outputBuffer;
+    std::mutex outputMutex;
+    std::vector<std::future<void>> futures;
     
+    std::vector<fs::path> buildFiles;
     for (const auto& entry : fs::directory_iterator(folderPath)) {
-        if (!entry.is_regular_file() || entry.path().extension() != TARGET_EXTENSION)
-            continue;
-
-        const auto& filePath = entry.path();
-        const auto filename = filePath.filename().string();
-
-        const auto buffer = readFile(filePath);
-        if (buffer.empty()) continue;
-
-        auto textSection = getTextSection(buffer);
-        if (!textSection.has_value()) {
-            std::cerr << "[-] .text section not found in: " << filename << '\n';
-            continue;
-        }
-
-        std::vector<uint8_t> textSegment(buffer.begin() + textSection->rawOffset,
-                                         buffer.begin() + textSection->rawOffset + textSection->rawSize);
-
-        const auto build = extractBuildNumber(filename).value_or(filename);
-        const auto matches = searchAllPatternOffsets(textSegment, pattern);
-
-        if (!matches.empty()) {
-            std::cout << "[+] Pattern found in v" << build << " (" << matches.size() << " matches): ";
-            for (size_t i = 0; i < matches.size(); ++i) {
-                std::cout << "0x" << std::hex << std::uppercase << matches[i];
-                if (i != matches.size() - 1)
-                    std::cout << ", ";
-            }
-            std::cout << std::dec << '\n';
-        } else {
-            std::cout << "[-] Pattern not found in v" << build << '\n';
+        if (entry.is_regular_file() && entry.path().extension() == TARGET_EXTENSION) {
+            buildFiles.push_back(entry.path());
         }
     }
 
+    for (const auto& path : buildFiles) {
+        futures.push_back(std::async(std::launch::async, scanFileLimited, path, std::cref(pattern), std::ref(outputMutex), std::ref(outputBuffer)));
+    }
+
+    for (auto& f : futures) {
+        f.get();
+    }
+    
+    {
+        std::lock_guard lock(outputMutex);
+        for (const auto& line : outputBuffer) {
+            std::cout << line << '\n';
+        }
+    }
+    
     const auto end = high_resolution_clock::now();
     const auto duration = duration_cast<milliseconds>(end - start).count();
     std::cout << "\n[~] Scan completed in " << duration << " ms\n";
