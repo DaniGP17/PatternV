@@ -10,6 +10,11 @@
 #include <future>
 #include <semaphore>
 
+#define RED     "\033[31m"
+#define GREEN   "\033[32m"
+#define YELLOW  "\033[33m"
+#define RESET   "\033[0m"
+
 namespace fs = std::filesystem;
 
 constexpr auto TARGET_EXTENSION = ".exe";
@@ -163,7 +168,7 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
     auto textSection = getTextSection(buffer);
     if (!textSection.has_value()) {
         std::lock_guard lock(outputMutex);
-        std::cerr << "[-] .text section not found in: " << filename << '\n';
+        std::cerr << RED << "[-] .text section not found in: " << filename << RESET << '\n';
         return;
     }
 
@@ -173,18 +178,17 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
     const auto build = extractBuildNumber(filename).value_or(filename);
     const auto matches = searchAllPatternOffsets(textSegment, textSize, pattern);
 
-    //std::lock_guard lock(outputMutex);
     std::ostringstream oss;
     if (!matches.empty()) {
-        oss << "[+] Pattern found in v" << build << " (" << matches.size() << " matches): ";
+        oss << GREEN << "[+]" << RESET << " Pattern found in v" << YELLOW << build << RESET << " (" << matches.size() << " matches): ";
         for (size_t i = 0; i < matches.size(); ++i) {
-            oss << "0x" << std::hex << std::uppercase << matches[i];
+            oss << YELLOW << "0x" << std::hex << std::uppercase << matches[i] << RESET;
             if (i != matches.size() - 1)
                 oss << ", ";
         }
-        oss << std::dec;
+        oss << RESET << std::dec;
     } else {
-        oss << "[-] Pattern not found in v" << build;
+        oss << RED << "[-]" << RESET << " Pattern not found in v" << YELLOW << build << RESET;
     }
 
     {
