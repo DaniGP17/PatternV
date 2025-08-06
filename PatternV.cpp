@@ -214,7 +214,7 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
 
     std::ostringstream oss;
     if (!matches.empty()) {
-        oss << GREEN << "[+]" << RESET << " Pattern found in v" << gameName << " v" << YELLOW << build
+        oss << GREEN << "[+]" << RESET << " Pattern found in " << gameName << " v" << YELLOW << build
             << RESET << " (" << matches.size() << " matches): ";
         for (size_t i = 0; i < matches.size(); ++i) {
             oss << YELLOW << "0x" << std::hex << std::uppercase << matches[i] << RESET;
