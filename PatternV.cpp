@@ -366,7 +366,7 @@ int main(int argc, char* argv[])
         if(pattern.empty())
         {
             std::cout << "Invalid pattern.\n";
-            continue;
+            break;
         }
 
         scanDirectory(folderPath, pattern);
