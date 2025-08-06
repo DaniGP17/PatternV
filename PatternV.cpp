@@ -13,6 +13,7 @@
 
 bool useColors = true;
 bool hideTime = false;
+bool minifiedOutput = false;
 
 #define RED     (useColors ? "\033[31m" : "")
 #define GREEN   (useColors ? "\033[32m" : "")
@@ -215,15 +216,28 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
 
     std::ostringstream oss;
     if (!matches.empty()) {
-        oss << GREEN << "[+]" << RESET << " Pattern found in " << gameName << " v" << YELLOW << build
-            << RESET << " (" << matches.size() << " matches): ";
-        for (size_t i = 0; i < matches.size(); ++i) {
-            oss << YELLOW << "0x" << std::hex << std::uppercase << matches[i] << RESET;
-            if (i != matches.size() - 1)
-                oss << ", ";
+        if (minifiedOutput) {
+            oss << GREEN << "[+] " << RESET << gameName << "_" << build << " (" << matches.size() << " matches): ";
+            for (size_t i = 0; i < matches.size(); ++i) {
+                oss << "0x" << std::hex << std::uppercase << matches[i];
+                if (i != matches.size() - 1)
+                    oss << ", ";
+            }
+        } else {
+            oss << GREEN << "[+]" << RESET << " Pattern found in " << gameName << " v" << YELLOW << build
+                << RESET << " (" << matches.size() << " matches): ";
+            for (size_t i = 0; i < matches.size(); ++i) {
+                oss << YELLOW << "0x" << std::hex << std::uppercase << matches[i] << RESET;
+                if (i != matches.size() - 1)
+                    oss << ", ";
+            }
         }
     } else {
-        oss << RED << "[-]" << RESET << " Pattern not found in " << gameName << " v" << YELLOW << build << RESET;
+        if (minifiedOutput) {
+            oss << RED << "[-] " << RESET << gameName << "_" << build << " (0 matches)";
+        } else {
+            oss << RED << "[-]" << RESET << " Pattern not found in " << gameName << " v" << YELLOW << build << RESET;
+        }
     }
 
     {
@@ -348,6 +362,8 @@ int main(int argc, char* argv[])
             extractMode = true;
         } else if (arg == "--hide-time") {
             hideTime = true;
+        } else if (arg == "--minified") {
+            minifiedOutput = true;
         } else if (folderPath == "Builds/") {
             folderPath = arg; 
         } else if (argPattern.empty()) {
