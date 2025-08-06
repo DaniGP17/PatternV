@@ -12,6 +12,7 @@
 #include <cstring>
 
 bool useColors = true;
+bool hideTime = false;
 
 #define RED     (useColors ? "\033[31m" : "")
 #define GREEN   (useColors ? "\033[32m" : "")
@@ -286,9 +287,11 @@ bool scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
     }
 
     const auto end = high_resolution_clock::now();
-    std::cout << "\n[~] Scan completed in "
-              << duration_cast<milliseconds>(end - start).count()
-              << " ms\n";
+    if (!hideTime) {
+        std::cout << "\n[~] Scan completed in "
+                << duration_cast<milliseconds>(end - start).count()
+                << " ms\n";
+    }
 
     return allFound;
 }
@@ -343,6 +346,8 @@ int main(int argc, char* argv[])
             useColors = false;
         } else if (arg == "--extract-text") {
             extractMode = true;
+        } else if (arg == "--hide-time") {
+            hideTime = true;
         } else if (folderPath == "Builds/") {
             folderPath = arg; 
         } else if (argPattern.empty()) {
