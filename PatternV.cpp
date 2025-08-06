@@ -11,10 +11,12 @@
 #include <semaphore>
 #include <cstring>
 
-#define RED     "\033[31m"
-#define GREEN   "\033[32m"
-#define YELLOW  "\033[33m"
-#define RESET   "\033[0m"
+bool useColors = true;
+
+#define RED     (useColors ? "\033[31m" : "")
+#define GREEN   (useColors ? "\033[32m" : "")
+#define YELLOW  (useColors ? "\033[33m" : "")
+#define RESET   (useColors ? "\033[0m" : "")
 
 namespace fs = std::filesystem;
 
@@ -318,16 +320,16 @@ int main(int argc, char* argv[])
 
     bool extractMode = false;
 
-    if(argc > 1)
-    {
-        folderPath = argv[1];
-        if (argc > 2)
-        {
-            if (std::string(argv[2]) == "--extract-text") {
-                extractMode = true;
-            } else {
-                argPattern = argv[2];
-            }
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--no-color") {
+            useColors = false;
+        } else if (arg == "--extract-text") {
+            extractMode = true;
+        } else if (folderPath == "Builds/") {
+            folderPath = arg; 
+        } else if (argPattern.empty()) {
+            argPattern = arg;
         }
     }
 
