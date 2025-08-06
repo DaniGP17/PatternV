@@ -224,7 +224,7 @@ void scanFileLimited(const fs::path& filePath, const std::vector<std::optional<u
     sem.release();
 }
 
-void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<uint8_t>>& pattern) {
+bool scanDirectory(const fs::path& folderPath, const std::vector<std::optional<uint8_t>>& pattern) {
     using namespace std::chrono;
     const auto start = high_resolution_clock::now();
 
@@ -250,6 +250,7 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
 
     for (auto& f : futures) f.get();
 
+    bool allFound = true;
     {
         std::lock_guard lock(outputMutex);
         std::sort(outputBuffer.begin(), outputBuffer.end(),
@@ -259,6 +260,9 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
 
         for (const auto& result : outputBuffer) {
             std::cout << result.line << '\n';
+            if (result.line.find("Pattern not found") != std::string::npos) {
+                allFound = false;
+            }
         }
     }
 
@@ -266,6 +270,8 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
     std::cout << "\n[~] Scan completed in "
               << duration_cast<milliseconds>(end - start).count()
               << " ms\n";
+
+    return allFound;
 }
 
 void extractTextSections(const fs::path& folderPath) {
@@ -340,8 +346,8 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        scanDirectory(folderPath, pattern);
-        return 0;
+        bool ok = scanDirectory(folderPath, pattern);
+        return ok ? 0 : 2;
     }
 
     if (!fs::exists(folderPath) || !fs::is_directory(folderPath)) {
