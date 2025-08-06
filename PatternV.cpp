@@ -17,7 +17,8 @@
 
 namespace fs = std::filesystem;
 
-constexpr auto TARGET_EXTENSION = ".exe";
+constexpr auto TARGET_EXTENSION_EXE = ".exe";
+constexpr auto TARGET_EXTENSION_TEXT = ".text";
 
 struct ResultLine {
     int build;
@@ -164,42 +165,54 @@ std::optional<SectionInfo> getTextSection(const std::vector<uint8_t>& buffer) {
     return std::nullopt;
 }
 
-void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern, std::mutex& outputMutex, std::vector<ResultLine>& outputBuffer)
+void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>>& pattern,
+              std::mutex& outputMutex, std::vector<ResultLine>& outputBuffer)
 {
     const auto filename = filePath.filename().string();
     const auto buffer = readFile(filePath);
     if (buffer.empty()) return;
 
-    auto textSection = getTextSection(buffer);
-    if (!textSection.has_value()) {
-        std::lock_guard lock(outputMutex);
-        std::cerr << RED << "[-] .text section not found in: " << filename << RESET << '\n';
-        return;
-    }
+    const uint8_t* textSegment = nullptr;
+    size_t textSize = 0;
 
-    const uint8_t* textSegment = buffer.data() + textSection->rawOffset;
-    size_t textSize = textSection->rawSize;
+    if (filePath.extension() == TARGET_EXTENSION_TEXT) {
+        textSegment = buffer.data();
+        textSize = buffer.size();
+    } else {
+        auto textSection = getTextSection(buffer);
+        if (!textSection.has_value()) {
+            std::lock_guard lock(outputMutex);
+            std::cerr << RED << "[-] .text section not found in: " << filename << RESET << '\n';
+            return;
+        }
+        textSegment = buffer.data() + textSection->rawOffset;
+        textSize = textSection->rawSize;
+    }
 
     const auto build = extractBuildNumber(filename).value_or(filename);
     const auto matches = searchAllPatternOffsets(textSegment, textSize, pattern);
 
     std::ostringstream oss;
     if (!matches.empty()) {
-        oss << GREEN << "[+]" << RESET << " Pattern found in v" << YELLOW << build << RESET << " (" << matches.size() << " matches): ";
+        oss << GREEN << "[+]" << RESET << " Pattern found in v" << YELLOW << build
+            << RESET << " (" << matches.size() << " matches): ";
         for (size_t i = 0; i < matches.size(); ++i) {
             oss << YELLOW << "0x" << std::hex << std::uppercase << matches[i] << RESET;
             if (i != matches.size() - 1)
                 oss << ", ";
         }
-        oss << RESET << std::dec;
     } else {
         oss << RED << "[-]" << RESET << " Pattern not found in v" << YELLOW << build << RESET;
     }
 
     {
         std::lock_guard lock(outputMutex);
-        int buildNum = std::stoi(build);
-        outputBuffer.push_back({ buildNum, oss.str() });
+        try {
+            int buildNum = std::stoi(build);
+            outputBuffer.push_back({ buildNum, oss.str() });
+        } catch (...) {
+            outputBuffer.push_back({ 0, oss.str() });
+        }
     }
 }
 
@@ -217,42 +230,46 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
     std::vector<ResultLine> outputBuffer;
     std::mutex outputMutex;
     std::vector<std::future<void>> futures;
-    
+
     std::vector<fs::path> buildFiles;
     for (const auto& entry : fs::directory_iterator(folderPath)) {
-        if (entry.is_regular_file() && entry.path().extension() == TARGET_EXTENSION) {
-            buildFiles.push_back(entry.path());
+        if (entry.is_regular_file()) {
+            auto ext = entry.path().extension().string();
+            if (ext == TARGET_EXTENSION_EXE || ext == TARGET_EXTENSION_TEXT) {
+                buildFiles.push_back(entry.path());
+            }
         }
     }
 
     for (const auto& path : buildFiles) {
-        futures.push_back(std::async(std::launch::async, scanFileLimited, path, std::cref(pattern), std::ref(outputMutex), std::ref(outputBuffer)));
+        futures.push_back(std::async(std::launch::async, scanFileLimited,
+                                     path, std::cref(pattern),
+                                     std::ref(outputMutex), std::ref(outputBuffer)));
     }
 
-    for (auto& f : futures) {
-        f.get();
-    }
-    
+    for (auto& f : futures) f.get();
+
     {
         std::lock_guard lock(outputMutex);
-
-        std::sort(outputBuffer.begin(), outputBuffer.end(), [](const ResultLine& a, const ResultLine& b) {
-            return a.build < b.build;
-        });
+        std::sort(outputBuffer.begin(), outputBuffer.end(),
+                  [](const ResultLine& a, const ResultLine& b) {
+                      return a.build < b.build;
+                  });
 
         for (const auto& result : outputBuffer) {
             std::cout << result.line << '\n';
         }
     }
-    
+
     const auto end = high_resolution_clock::now();
-    const auto duration = duration_cast<milliseconds>(end - start).count();
-    std::cout << "\n[~] Scan completed in " << duration << " ms\n";
+    std::cout << "\n[~] Scan completed in "
+              << duration_cast<milliseconds>(end - start).count()
+              << " ms\n";
 }
 
 void extractTextSections(const fs::path& folderPath) {
     for (const auto& entry : fs::directory_iterator(folderPath)) {
-        if (!entry.is_regular_file() || entry.path().extension() != TARGET_EXTENSION)
+        if (!entry.is_regular_file() || entry.path().extension() != TARGET_EXTENSION_EXE)
             continue;
 
         const auto buffer = readFile(entry.path());
