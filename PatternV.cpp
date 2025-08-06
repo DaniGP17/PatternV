@@ -250,18 +250,66 @@ void scanDirectory(const fs::path& folderPath, const std::vector<std::optional<u
     std::cout << "\n[~] Scan completed in " << duration << " ms\n";
 }
 
+void extractTextSections(const fs::path& folderPath) {
+    for (const auto& entry : fs::directory_iterator(folderPath)) {
+        if (!entry.is_regular_file() || entry.path().extension() != TARGET_EXTENSION)
+            continue;
+
+        const auto buffer = readFile(entry.path());
+        if (buffer.empty())
+            continue;
+
+        auto textSection = getTextSection(buffer);
+        if (!textSection.has_value()) {
+            std::cerr << RED << "[-] .text section not found in: " 
+                      << entry.path().filename().string() << RESET << '\n';
+            continue;
+        }
+
+        fs::path outPath = entry.path();
+        outPath += ".text";
+
+        std::ofstream outFile(outPath, std::ios::binary);
+        if (!outFile) {
+            std::cerr << RED << "[-] Failed to create: " << outPath << RESET << '\n';
+            continue;
+        }
+
+        outFile.write(
+            reinterpret_cast<const char*>(buffer.data() + textSection->rawOffset),
+            textSection->rawSize
+        );
+
+        std::cout << GREEN << "[+]" << RESET << " Extracted .text from " 
+                  << entry.path().filename().string()
+                  << " -> " << outPath.filename().string()
+                  << " (" << textSection->rawSize << " bytes)\n";
+    }
+}
+
 int main(int argc, char* argv[])
 {
     fs::path folderPath = "Builds/";
     std::string argPattern;
+
+    bool extractMode = false;
 
     if(argc > 1)
     {
         folderPath = argv[1];
         if (argc > 2)
         {
-            argPattern = argv[2];
+            if (std::string(argv[2]) == "--extract-text") {
+                extractMode = true;
+            } else {
+                argPattern = argv[2];
+            }
         }
+    }
+
+    if (extractMode) {
+        extractTextSections(folderPath);
+        return 0;
     }
 
     if (!argPattern.empty())
