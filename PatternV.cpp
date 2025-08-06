@@ -123,6 +123,22 @@ std::vector<uint8_t> readFile(const fs::path& filepath) {
     return buffer;
 }
 
+std::string extractGameName(const std::string& filename) {
+    std::string nameOnly = filename.substr(0, filename.find_last_of('.'));
+
+    size_t dashPos = nameOnly.find('-');
+    size_t underscorePos = nameOnly.find('_');
+
+    size_t sepPos = std::min(
+        dashPos == std::string::npos ? nameOnly.size() : dashPos,
+        underscorePos == std::string::npos ? nameOnly.size() : underscorePos
+    );
+
+    if (sepPos == std::string::npos) return nameOnly;
+
+    return nameOnly.substr(0, sepPos);
+}
+
 std::optional<std::string> extractBuildNumber(const std::string& filename) {
     std::regex pattern(R"((\d{4}))");
     std::smatch match;
@@ -192,12 +208,13 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
         textSize = textSection->rawSize;
     }
 
+    const auto gameName = extractGameName(filename);
     const auto build = extractBuildNumber(filename).value_or(filename);
     const auto matches = searchAllPatternOffsets(textSegment, textSize, pattern);
 
     std::ostringstream oss;
     if (!matches.empty()) {
-        oss << GREEN << "[+]" << RESET << " Pattern found in v" << YELLOW << build
+        oss << GREEN << "[+]" << RESET << " Pattern found in v" << gameName << " v" << YELLOW << build
             << RESET << " (" << matches.size() << " matches): ";
         for (size_t i = 0; i < matches.size(); ++i) {
             oss << YELLOW << "0x" << std::hex << std::uppercase << matches[i] << RESET;
@@ -205,7 +222,7 @@ void scanFile(const fs::path& filePath, const std::vector<std::optional<uint8_t>
                 oss << ", ";
         }
     } else {
-        oss << RED << "[-]" << RESET << " Pattern not found in v" << YELLOW << build << RESET;
+        oss << RED << "[-]" << RESET << " Pattern not found in " << gameName << " v" << YELLOW << build << RESET;
     }
 
     {
